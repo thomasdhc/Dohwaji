@@ -9,9 +9,10 @@ The project is inspired by using the macOS Desktop as a visual worktable: relate
 The first prototype will open one local folder as a desktop-like canvas and allow the user to:
 
 - see the folder's images together without importing or copying them;
-- drag images into a useful spatial arrangement;
+- select one image or marquee-select several images;
+- drag selected images into a useful spatial arrangement;
 - reopen the folder later with that arrangement restored; and
-- open an image at full size before returning to the canvas.
+- open an original image directly from the canvas.
 
 The original image files must remain unchanged. Layout data will be stored separately by Dohwaji.
 
@@ -29,10 +30,10 @@ The command opens Dohwaji in the default browser and keeps serving it locally un
 
 On the canvas:
 
-- drag an image to arrange it;
-- double-click an image, or focus it and press Enter, to open the full-size viewer;
-- use the left and right arrow keys to move between full-size images;
-- press Escape or select **Close** to return to the canvas.
+- drag across empty canvas space to select several images;
+- drag any selected image to move the whole selection;
+- select an unselected image to return to a single-image selection; and
+- double-click an image, or focus it and press Enter, to open the original in a new browser tab.
 
 Canvas positions are saved under `~/Library/Application Support/Dohwaji/`. Dohwaji does not write to the selected folder or modify its images.
 

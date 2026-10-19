@@ -20,21 +20,10 @@
   </header>
 
   <main id="viewport" class="viewport" aria-label="Reference canvas">
-    <div id="canvas" class="canvas"></div>
+    <div id="canvas" class="canvas">
+      <div id="selection-box" class="selection-box" hidden></div>
+    </div>
   </main>
-
-  <dialog id="lightbox" class="lightbox" aria-label="Full-size image viewer">
-    <div class="lightbox-bar">
-      <span id="lightbox-name"></span>
-      <div class="lightbox-actions">
-        <a id="open-original" target="_blank" rel="noopener">Open original</a>
-        <button id="close-lightbox" type="button" aria-label="Close full-size viewer">Close</button>
-      </div>
-    </div>
-    <div class="lightbox-stage">
-      <img id="lightbox-image" alt="">
-    </div>
-  </dialog>
 
   <template id="image-template">
     <button class="image-tile" type="button">

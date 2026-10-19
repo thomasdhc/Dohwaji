@@ -6,11 +6,7 @@ const folderName = document.querySelector("#folder-name");
 const imageCount = document.querySelector("#image-count");
 const saveStatus = document.querySelector("#save-status");
 const imageTemplate = document.querySelector("#image-template");
-const lightbox = document.querySelector("#lightbox");
-const lightboxImage = document.querySelector("#lightbox-image");
-const lightboxName = document.querySelector("#lightbox-name");
-const openOriginal = document.querySelector("#open-original");
-const closeLightboxButton = document.querySelector("#close-lightbox");
+const selectionBox = document.querySelector("#selection-box");
 
 const GRID_COLUMNS = 5;
 const GRID_X = 300;
@@ -20,10 +16,10 @@ const GRID_OFFSET_Y = 64;
 const DRAG_THRESHOLD = 3;
 
 const items = new Map();
-let orderedImages = [];
+const selectedNames = new Set();
 let highestZ = 0;
 let drag = null;
-let activeImageIndex = -1;
+let marquee = null;
 let saveTimer = null;
 
 function initialPosition(index) {
@@ -56,40 +52,76 @@ function expandCanvas() {
   canvas.style.height = `${Math.ceil(height)}px`;
 }
 
-function bringToFront(item) {
-  highestZ += 1;
-  item.z = highestZ;
-  setTilePosition(item);
+function applySelection(names) {
+  selectedNames.clear();
+  for (const name of names) selectedNames.add(name);
+
+  for (const [name, item] of items) {
+    const isSelected = selectedNames.has(name);
+    item.element.classList.toggle("selected", isSelected);
+    item.element.setAttribute("aria-pressed", String(isSelected));
+  }
+}
+
+function bringSelectionToFront() {
+  const selectedItems = [...selectedNames]
+    .map((name) => items.get(name))
+    .filter(Boolean)
+    .sort((left, right) => left.z - right.z);
+
+  for (const item of selectedItems) {
+    highestZ += 1;
+    item.z = highestZ;
+    setTilePosition(item);
+  }
 }
 
 function pointerDown(event, item) {
-  if (event.button !== 0 || lightbox.open) return;
+  if (event.button !== 0) return;
 
   event.preventDefault();
-  bringToFront(item);
+  item.element.focus({ preventScroll: true });
+  if (!selectedNames.has(item.image.name)) {
+    const nextSelection = event.shiftKey
+      ? new Set([...selectedNames, item.image.name])
+      : new Set([item.image.name]);
+    applySelection(nextSelection);
+  }
+
+  bringSelectionToFront();
+  const movingItems = [...selectedNames].map((name) => {
+    const selectedItem = items.get(name);
+    return { item: selectedItem, startX: selectedItem.x, startY: selectedItem.y };
+  });
+
   drag = {
-    item,
+    primary: item,
+    movingItems,
     pointerId: event.pointerId,
     startClientX: event.clientX,
     startClientY: event.clientY,
-    startX: item.x,
-    startY: item.y,
+    minimumX: Math.min(...movingItems.map((entry) => entry.startX)),
+    minimumY: Math.min(...movingItems.map((entry) => entry.startY)),
     moved: false,
   };
-  item.element.classList.add("dragging");
+  for (const entry of movingItems) entry.item.element.classList.add("dragging");
   item.element.setPointerCapture(event.pointerId);
 }
 
 function pointerMove(event) {
   if (!drag || event.pointerId !== drag.pointerId) return;
 
-  const dx = event.clientX - drag.startClientX;
-  const dy = event.clientY - drag.startClientY;
+  let dx = event.clientX - drag.startClientX;
+  let dy = event.clientY - drag.startClientY;
   if (Math.hypot(dx, dy) >= DRAG_THRESHOLD) drag.moved = true;
+  dx = Math.max(dx, -drag.minimumX);
+  dy = Math.max(dy, -drag.minimumY);
 
-  drag.item.x = Math.max(0, Math.round(drag.startX + dx));
-  drag.item.y = Math.max(0, Math.round(drag.startY + dy));
-  setTilePosition(drag.item);
+  for (const entry of drag.movingItems) {
+    entry.item.x = Math.round(entry.startX + dx);
+    entry.item.y = Math.round(entry.startY + dy);
+    setTilePosition(entry.item);
+  }
   expandCanvas();
 }
 
@@ -97,16 +129,77 @@ function pointerUp(event) {
   if (!drag || event.pointerId !== drag.pointerId) return;
 
   const completed = drag;
-  completed.item.element.classList.remove("dragging");
-  if (completed.item.element.hasPointerCapture(event.pointerId)) {
-    completed.item.element.releasePointerCapture(event.pointerId);
+  for (const entry of completed.movingItems) {
+    entry.item.element.classList.remove("dragging");
+    if (completed.moved) entry.item.suppressOpenUntil = Date.now() + 500;
+  }
+  if (completed.primary.element.hasPointerCapture(event.pointerId)) {
+    completed.primary.element.releasePointerCapture(event.pointerId);
   }
   drag = null;
-
-  if (completed.moved) {
-    completed.item.suppressOpenUntil = Date.now() + 500;
-  }
   scheduleSave(0);
+}
+
+function canvasPoint(event) {
+  const bounds = canvas.getBoundingClientRect();
+  return {
+    x: event.clientX - bounds.left,
+    y: event.clientY - bounds.top,
+  };
+}
+
+function marqueeDown(event) {
+  if (event.button !== 0 || event.target !== canvas) return;
+
+  event.preventDefault();
+  const origin = canvasPoint(event);
+  const baseSelection = event.shiftKey ? new Set(selectedNames) : new Set();
+  applySelection(baseSelection);
+  marquee = {
+    pointerId: event.pointerId,
+    origin,
+    baseSelection,
+    moved: false,
+  };
+  selectionBox.hidden = true;
+  canvas.setPointerCapture(event.pointerId);
+}
+
+function marqueeMove(event) {
+  if (!marquee || event.pointerId !== marquee.pointerId) return;
+
+  const point = canvasPoint(event);
+  const left = Math.min(marquee.origin.x, point.x);
+  const top = Math.min(marquee.origin.y, point.y);
+  const right = Math.max(marquee.origin.x, point.x);
+  const bottom = Math.max(marquee.origin.y, point.y);
+  if (Math.hypot(point.x - marquee.origin.x, point.y - marquee.origin.y) >= DRAG_THRESHOLD) {
+    marquee.moved = true;
+  }
+
+  selectionBox.hidden = !marquee.moved;
+  selectionBox.style.transform = `translate(${left}px, ${top}px)`;
+  selectionBox.style.width = `${right - left}px`;
+  selectionBox.style.height = `${bottom - top}px`;
+
+  const nextSelection = new Set(marquee.baseSelection);
+  if (marquee.moved) {
+    for (const [name, item] of items) {
+      const itemRight = item.x + item.element.offsetWidth;
+      const itemBottom = item.y + item.element.offsetHeight;
+      const intersects = item.x < right && itemRight > left && item.y < bottom && itemBottom > top;
+      if (intersects) nextSelection.add(name);
+    }
+  }
+  applySelection(nextSelection);
+}
+
+function marqueeUp(event) {
+  if (!marquee || event.pointerId !== marquee.pointerId) return;
+
+  if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  marquee = null;
+  selectionBox.hidden = true;
 }
 
 function layoutPayload() {
@@ -150,32 +243,9 @@ function imageUrl(image) {
   return `/media?name=${encodeURIComponent(image.name)}`;
 }
 
-function openLightbox(index) {
-  if (index < 0 || index >= orderedImages.length) return;
-
-  activeImageIndex = index;
-  const image = orderedImages[index];
-  const url = imageUrl(image);
-  lightboxImage.src = url;
-  lightboxImage.alt = image.name;
-  lightboxName.textContent = image.name;
-  openOriginal.href = url;
-
-  if (!lightbox.open) lightbox.showModal();
-}
-
-function closeLightbox() {
-  if (lightbox.open) lightbox.close();
-  lightboxImage.removeAttribute("src");
-  if (activeImageIndex >= 0) {
-    items.get(orderedImages[activeImageIndex].name)?.element.focus({ preventScroll: true });
-  }
-}
-
-function showAdjacentImage(offset) {
-  if (!lightbox.open || orderedImages.length === 0) return;
-  activeImageIndex = (activeImageIndex + offset + orderedImages.length) % orderedImages.length;
-  openLightbox(activeImageIndex);
+function openOriginal(image) {
+  const originalTab = window.open(imageUrl(image), "_blank");
+  if (originalTab) originalTab.opener = null;
 }
 
 function createTile(image, index, savedPosition) {
@@ -198,19 +268,21 @@ function createTile(image, index, savedPosition) {
   img.addEventListener("error", () => {
     element.title = `Could not load ${image.name}`;
   });
-  element.title = `${image.name}\nDrag to arrange · Double-click to open`;
-  element.setAttribute("aria-label", `${image.name}. Drag to arrange; press Enter to open.`);
+  element.title = `${image.name}\nDrag to arrange · Double-click to open original`;
+  element.setAttribute("aria-label", `${image.name}. Drag to arrange; press Enter to open the original.`);
+  element.setAttribute("aria-pressed", "false");
   element.addEventListener("pointerdown", (event) => pointerDown(event, item));
   element.addEventListener("pointermove", pointerMove);
   element.addEventListener("pointerup", pointerUp);
   element.addEventListener("pointercancel", pointerUp);
-  element.addEventListener("dblclick", () => {
-    if (Date.now() >= item.suppressOpenUntil) openLightbox(index);
+  element.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    if (Date.now() >= item.suppressOpenUntil) openOriginal(image);
   });
   element.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") {
+    if (event.key === "Enter") {
       event.preventDefault();
-      openLightbox(index);
+      openOriginal(image);
     }
   });
 
@@ -237,17 +309,16 @@ async function start() {
     folderName.textContent = data.folder;
     folderName.title = data.folderPath;
     document.title = `${data.folder} — Dohwaji`;
-    orderedImages = data.images;
-    imageCount.textContent = `${orderedImages.length} image${orderedImages.length === 1 ? "" : "s"}`;
+    imageCount.textContent = `${data.images.length} image${data.images.length === 1 ? "" : "s"}`;
 
-    if (orderedImages.length === 0) {
+    if (data.images.length === 0) {
       showCanvasMessage("This folder has no supported images. Dohwaji currently displays JPEG, PNG, WebP, GIF, and BMP files directly inside the selected folder.");
       setSaveStatus("");
       return;
     }
 
     let hasNewImages = false;
-    orderedImages.forEach((image, index) => {
+    data.images.forEach((image, index) => {
       const savedPosition = data.layout.items?.[image.name];
       hasNewImages = createTile(image, index, savedPosition) || hasNewImages;
     });
@@ -262,19 +333,10 @@ async function start() {
   }
 }
 
-closeLightboxButton.addEventListener("click", closeLightbox);
-lightbox.addEventListener("click", (event) => {
-  if (event.target === lightbox) closeLightbox();
-});
-lightbox.addEventListener("cancel", (event) => {
-  event.preventDefault();
-  closeLightbox();
-});
-document.addEventListener("keydown", (event) => {
-  if (!lightbox.open) return;
-  if (event.key === "ArrowLeft") showAdjacentImage(-1);
-  if (event.key === "ArrowRight") showAdjacentImage(1);
-});
+canvas.addEventListener("pointerdown", marqueeDown);
+canvas.addEventListener("pointermove", marqueeMove);
+canvas.addEventListener("pointerup", marqueeUp);
+canvas.addEventListener("pointercancel", marqueeUp);
 window.addEventListener("resize", expandCanvas);
 
 start();
