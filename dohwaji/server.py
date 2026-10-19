@@ -140,28 +140,76 @@ class DohwajiApp:
             raise ValueError("Dohwaji state must be stored outside the selected folder")
 
         self.folder = resolved
+        self.state_root = resolved_state_root
         self.store = LayoutStore(resolved_state_root, resolved)
 
-    def current_names(self) -> list[str]:
-        return image_names(self.folder)
+    def resolve_folder(self, relative_folder: str = "") -> Path | None:
+        """Resolve a browser-supplied folder while confining it to the launched root."""
+        if not isinstance(relative_folder, str):
+            return None
+        requested = Path(relative_folder)
+        if requested.is_absolute() or ".." in requested.parts:
+            return None
+        try:
+            resolved = (self.folder / requested).resolve()
+            resolved.relative_to(self.folder)
+        except (OSError, ValueError):
+            return None
+        return resolved if resolved.is_dir() else None
 
-    def bootstrap(self) -> dict[str, Any]:
-        names = self.current_names()
-        allowed = set(names)
+    def folder_options(self) -> list[dict[str, str]]:
+        """List navigable descendant folders without traversing hidden or linked trees."""
+        options = [{"value": "", "label": f"{self.folder.name or self.folder} (root)"}]
+        relative_folders = []
+        for current, directory_names, _ in os.walk(self.folder, followlinks=False):
+            current_path = Path(current)
+            directory_names[:] = [
+                name
+                for name in directory_names
+                if not name.startswith(".") and not (current_path / name).is_symlink()
+            ]
+            relative_folders.extend(
+                (current_path / name).relative_to(self.folder).as_posix() for name in directory_names
+            )
+        options.extend(
+            {"value": relative, "label": relative.replace("/", " / ")}
+            for relative in sorted(relative_folders, key=str.casefold)
+        )
+        return options
+
+    def current_names(self, relative_folder: str = "") -> list[str]:
+        folder = self.resolve_folder(relative_folder)
+        if folder is None:
+            raise ValueError("Folder not found")
+        return image_names(folder)
+
+    def bootstrap(self, relative_folder: str = "") -> dict[str, Any]:
+        folder = self.resolve_folder(relative_folder)
+        if folder is None:
+            raise ValueError("Folder not found")
+        names = image_names(folder)
+        selected_folder = "" if folder == self.folder else folder.relative_to(self.folder).as_posix()
+        store = LayoutStore(self.state_root, folder)
         return {
-            "folder": self.folder.name or str(self.folder),
-            "folderPath": str(self.folder),
+            "folder": folder.name or str(folder),
+            "folderPath": str(folder),
+            "selectedFolder": selected_folder,
+            "folders": self.folder_options(),
             "images": [{"name": name} for name in names],
-            "layout": self.store.load(allowed),
+            "layout": store.load(set(names)),
         }
 
-    def save_layout(self, value: Any) -> dict[str, Any]:
-        return self.store.save(value, set(self.current_names()))
+    def save_layout(self, value: Any, relative_folder: str = "") -> dict[str, Any]:
+        folder = self.resolve_folder(relative_folder)
+        if folder is None:
+            raise ValueError("Folder not found")
+        return LayoutStore(self.state_root, folder).save(value, set(image_names(folder)))
 
-    def media_path(self, name: str) -> Path | None:
-        if name not in set(self.current_names()):
+    def media_path(self, name: str, relative_folder: str = "") -> Path | None:
+        folder = self.resolve_folder(relative_folder)
+        if folder is None or name not in set(image_names(folder)):
             return None
-        path = self.folder / name
+        path = folder / name
         return path if path.is_file() else None
 
 
@@ -196,15 +244,26 @@ class DohwajiRequestHandler(BaseHTTPRequestHandler):
             filename, content_type = STATIC_FILES[parsed.path]
             self._send_file(STATIC_ROOT / filename, content_type)
             return
+        query = parse_qs(parsed.query, keep_blank_values=True)
         if parsed.path == "/api/bootstrap":
-            self._send_json(self.server.app.bootstrap())
+            folders = query.get("folder", [""])
+            if len(folders) != 1:
+                self._send_error(HTTPStatus.BAD_REQUEST, "One folder is required")
+                return
+            try:
+                bootstrap = self.server.app.bootstrap(folders[0])
+            except ValueError:
+                self._send_error(HTTPStatus.NOT_FOUND, "Folder not found")
+                return
+            self._send_json(bootstrap)
             return
         if parsed.path == "/media":
-            names = parse_qs(parsed.query, keep_blank_values=True).get("name", [])
-            if len(names) != 1:
-                self._send_error(HTTPStatus.BAD_REQUEST, "One image name is required")
+            names = query.get("name", [])
+            folders = query.get("folder", [""])
+            if len(names) != 1 or len(folders) != 1:
+                self._send_error(HTTPStatus.BAD_REQUEST, "One folder and image name are required")
                 return
-            media_path = self.server.app.media_path(names[0])
+            media_path = self.server.app.media_path(names[0], folders[0])
             if media_path is None:
                 self._send_error(HTTPStatus.NOT_FOUND, "Image not found")
                 return
@@ -214,8 +273,13 @@ class DohwajiRequestHandler(BaseHTTPRequestHandler):
         self._send_error(HTTPStatus.NOT_FOUND, "Not found")
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
-        if urlsplit(self.path).path != "/api/layout":
+        parsed = urlsplit(self.path)
+        if parsed.path != "/api/layout":
             self._send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return
+        folders = parse_qs(parsed.query, keep_blank_values=True).get("folder", [""])
+        if len(folders) != 1:
+            self._send_error(HTTPStatus.BAD_REQUEST, "One folder is required")
             return
 
         try:
@@ -233,7 +297,11 @@ class DohwajiRequestHandler(BaseHTTPRequestHandler):
             self._send_error(HTTPStatus.BAD_REQUEST, "Invalid JSON")
             return
 
-        saved = self.server.app.save_layout(payload)
+        try:
+            saved = self.server.app.save_layout(payload, folders[0])
+        except ValueError:
+            self._send_error(HTTPStatus.NOT_FOUND, "Folder not found")
+            return
         self._send_json(saved)
 
     def _send_file(self, path: Path, content_type: str) -> None:
@@ -274,9 +342,9 @@ def create_server(app: DohwajiApp, port: int = 8765) -> DohwajiServer:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python3 -m dohwaji",
-        description="Open a local image folder as a persistent spatial canvas.",
+        description="Open a local image folder tree as persistent spatial canvases.",
     )
-    parser.add_argument("folder", type=Path, help="folder whose direct-child images should be shown")
+    parser.add_argument("folder", type=Path, help="root folder to open and navigate")
     parser.add_argument("--port", type=int, default=8765, help="local port (default: 8765)")
     parser.add_argument("--no-browser", action="store_true", help="do not open the default browser")
     parser.add_argument("--state-dir", type=Path, help=argparse.SUPPRESS)
