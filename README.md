@@ -18,15 +18,39 @@ The original image files must remain unchanged. Layout data will be stored separ
 
 See [`docs/PLAN.md`](docs/PLAN.md) for the prototype boundary and acceptance criteria.
 
-## Run the prototype
+## Launch Dohwaji
 
-Dohwaji has no third-party dependencies and requires Python 3.8 or newer. From the repository root:
+Dohwaji has no third-party dependencies and requires Python 3.8 or newer.
+
+1. Open Terminal.
+2. Change to the Dohwaji repository:
+
+   ```bash
+   cd /Users/donghyukchang/Workspace/dohwaji
+   ```
+
+3. Launch Dohwaji with the folder you want to arrange. To open the loose images on the Desktop:
+
+   ```bash
+   python3 -m dohwaji ~/Desktop
+   ```
+
+Dohwaji opens `http://127.0.0.1:8765/` in the default browser. Keep the Terminal process running while using the canvas. Press Control-C in that Terminal window to stop Dohwaji.
+
+To open a different folder, pass its path instead. Quote paths containing spaces:
 
 ```bash
-python3 -m dohwaji ~/Desktop
+python3 -m dohwaji ~/Desktop/new_ref
+python3 -m dohwaji "/path/to/Drawing References"
 ```
 
-The command opens Dohwaji in the default browser and keeps serving it locally until you press Control-C. Another folder can be supplied instead of `~/Desktop`; only supported images directly inside that folder are shown.
+Only supported images directly inside the selected folder are shown; nested folders are not included in the first prototype. Opening the same folder again restores its saved arrangement.
+
+If the browser does not open automatically, visit `http://127.0.0.1:8765/` manually. If port 8765 is already occupied, select another local port:
+
+```bash
+python3 -m dohwaji ~/Desktop --port 8766
+```
 
 On the canvas:
 
