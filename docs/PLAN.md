@@ -22,7 +22,10 @@ Dohwaji should preserve that visual and spatial behavior. The filesystem remains
 - Opening an image uses an in-app full-size overlay with straightforward return to the prior canvas position.
 - Original images are read-only from Dohwaji's perspective: no moving, renaming, deleting, conversion, embedded metadata, or sidecar files in the selected folder.
 - Layout state is stored separately in the user's local application data and keyed to the selected folder and image paths.
-- The first implementation should favor a small local server and a vanilla browser interface so the interaction can be tested before choosing a heavier native framework.
+- The first implementation uses a Python standard-library local server and a vanilla browser interface so the interaction can be tested before choosing a heavier native framework.
+- The canvas is scrollable and expands as images move; pan-and-zoom navigation is deferred.
+- Newly discovered images begin in a deterministic five-column arrangement with a maximum displayed size of 260 by 220 pixels.
+- The first prototype supports browser-native JPEG, PNG, WebP, GIF, and BMP images.
 - The application does not upload images or require an external service.
 
 ## Acceptance Invariants
@@ -54,9 +57,3 @@ Dohwaji should preserve that visual and spatial behavior. The filesystem remains
 - Moving groups between active and archived areas
 - Editing, deleting, renaming, or reorganizing source files
 - Mobile access, synchronization, or cloud storage
-
-## Open Questions
-
-- Which image formats beyond JPEG, PNG, and WebP must the first prototype support?
-- Should the initial canvas be bounded and scrollable or immediately support pan-and-zoom navigation?
-- What display size should newly discovered images use before the user resizes or arranges them?
