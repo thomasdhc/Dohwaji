@@ -29,19 +29,21 @@ Dohwaji has no third-party dependencies and requires Python 3.8 or newer.
    cd /Users/donghyukchang/Workspace/dohwaji
    ```
 
-3. Launch Dohwaji with the folder you want to arrange. To open the loose images on the Desktop:
+3. Launch the main library canvas, which contains loose and newly captured screenshots:
 
    ```bash
-   python3 -m dohwaji ~/Desktop
+   python3 -m dohwaji library
    ```
 
 Dohwaji opens `http://127.0.0.1:8765/` in the default browser. Keep the Terminal process running while using the canvas. Press Control-C in that Terminal window to stop Dohwaji.
 
-To open a different folder, pass its path instead. Quote paths containing spaces:
+The local image collection lives under `library/`, which is intentionally excluded from Git. macOS also saves new screenshots directly into this directory. The existing `screenshots/`, `reference/`, and `new_ref/` archives remain nested beneath it.
+
+To use one archived folder as its own canvas, pass that folder instead. Quote paths containing spaces:
 
 ```bash
-python3 -m dohwaji ~/Desktop/new_ref
-python3 -m dohwaji "/path/to/Drawing References"
+python3 -m dohwaji library/reference/fashion
+python3 -m dohwaji "library/screenshots/misc/art"
 ```
 
 Only supported images directly inside the selected folder are shown; nested folders are not included in the first prototype. Opening the same folder again restores its saved arrangement.
@@ -49,7 +51,7 @@ Only supported images directly inside the selected folder are shown; nested fold
 If the browser does not open automatically, visit `http://127.0.0.1:8765/` manually. If port 8765 is already occupied, select another local port:
 
 ```bash
-python3 -m dohwaji ~/Desktop --port 8766
+python3 -m dohwaji library --port 8766
 ```
 
 On the canvas:
