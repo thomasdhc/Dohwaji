@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Dohwaji</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="toolbar">
+    <div class="identity">
+      <strong>Dohwaji</strong>
+      <span id="folder-name">Opening folder…</span>
+    </div>
+    <div class="toolbar-meta">
+      <span id="image-count"></span>
+      <span id="save-status" role="status" aria-live="polite"></span>
+    </div>
+  </header>
+
+  <main id="viewport" class="viewport" aria-label="Reference canvas">
+    <div id="canvas" class="canvas">
+      <div id="selection-box" class="selection-box" hidden></div>
+    </div>
+  </main>
+
+  <template id="image-template">
+    <button class="image-tile" type="button">
+      <img draggable="false" alt="">
+    </button>
+  </template>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
