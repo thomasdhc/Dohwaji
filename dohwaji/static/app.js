@@ -2,7 +2,7 @@
 
 const canvas = document.querySelector("#canvas");
 const viewport = document.querySelector("#viewport");
-const folderName = document.querySelector("#folder-name");
+const folderSelect = document.querySelector("#folder-select");
 const imageCount = document.querySelector("#image-count");
 const saveStatus = document.querySelector("#save-status");
 const imageTemplate = document.querySelector("#image-template");
@@ -21,6 +21,8 @@ let highestZ = 0;
 let drag = null;
 let marquee = null;
 let saveTimer = null;
+let saveQueue = Promise.resolve(true);
+let activeFolder = "";
 
 function initialPosition(index) {
   return {
@@ -215,36 +217,45 @@ function setSaveStatus(message, state = "") {
   saveStatus.dataset.state = state;
 }
 
-async function saveLayout() {
+function saveLayout(folder = activeFolder, payload = layoutPayload()) {
   window.clearTimeout(saveTimer);
   saveTimer = null;
-  setSaveStatus("Saving…");
 
-  try {
-    const response = await fetch("/api/layout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(layoutPayload()),
-    });
-    if (!response.ok) throw new Error(`Save failed (${response.status})`);
-    setSaveStatus("Saved");
-  } catch (error) {
-    console.error(error);
-    setSaveStatus("Could not save layout", "error");
-  }
+  const operation = async () => {
+    setSaveStatus("Saving…");
+    const query = new URLSearchParams({ folder });
+    try {
+      const response = await fetch(`/api/layout?${query}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error(`Save failed (${response.status})`);
+      setSaveStatus("Saved");
+      return true;
+    } catch (error) {
+      console.error(error);
+      setSaveStatus("Could not save layout", "error");
+      return false;
+    }
+  };
+
+  saveQueue = saveQueue.then(operation, operation);
+  return saveQueue;
 }
 
 function scheduleSave(delay = 180) {
   window.clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(saveLayout, delay);
+  saveTimer = window.setTimeout(() => saveLayout(), delay);
 }
 
-function imageUrl(image) {
-  return `/media?name=${encodeURIComponent(image.name)}`;
+function imageUrl(image, folder = activeFolder) {
+  const query = new URLSearchParams({ folder, name: image.name });
+  return `/media?${query}`;
 }
 
-function openOriginal(image) {
-  const originalTab = window.open(imageUrl(image), "_blank");
+function openOriginal(image, folder = activeFolder) {
+  const originalTab = window.open(imageUrl(image, folder), "_blank");
   if (originalTab) originalTab.opener = null;
 }
 
@@ -256,6 +267,7 @@ function createTile(image, index, savedPosition) {
   const img = element.querySelector("img");
   const item = {
     image,
+    folder: activeFolder,
     element,
     x: Math.max(0, finiteNumber(position.x, fallback.x)),
     y: Math.max(0, finiteNumber(position.y, fallback.y)),
@@ -263,7 +275,7 @@ function createTile(image, index, savedPosition) {
     suppressOpenUntil: 0,
   };
 
-  img.src = imageUrl(image);
+  img.src = imageUrl(image, item.folder);
   img.alt = image.name;
   img.addEventListener("error", () => {
     element.title = `Could not load ${image.name}`;
@@ -277,12 +289,12 @@ function createTile(image, index, savedPosition) {
   element.addEventListener("pointercancel", pointerUp);
   element.addEventListener("dblclick", (event) => {
     event.preventDefault();
-    if (Date.now() >= item.suppressOpenUntil) openOriginal(image);
+    if (Date.now() >= item.suppressOpenUntil) openOriginal(image, item.folder);
   });
   element.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
-      openOriginal(image);
+      openOriginal(image, item.folder);
     }
   });
 
@@ -300,21 +312,51 @@ function showCanvasMessage(message, isError = false) {
   canvas.appendChild(paragraph);
 }
 
-async function start() {
+function resetCanvas() {
+  applySelection(new Set());
+  for (const item of items.values()) item.element.remove();
+  items.clear();
+  canvas.querySelectorAll(".empty-message, .error-message").forEach((message) => message.remove());
+  highestZ = 0;
+  drag = null;
+  marquee = null;
+  selectionBox.hidden = true;
+  viewport.scrollTo(0, 0);
+  expandCanvas();
+}
+
+function populateFolderSelect(folders, selectedFolder, folderPath) {
+  folderSelect.replaceChildren();
+  for (const folder of folders) {
+    const option = document.createElement("option");
+    option.value = folder.value;
+    option.textContent = folder.label;
+    folderSelect.appendChild(option);
+  }
+  folderSelect.value = selectedFolder;
+  folderSelect.title = folderPath;
+}
+
+async function loadFolder(relativeFolder) {
+  folderSelect.disabled = true;
+  setSaveStatus("Opening…");
+  const query = new URLSearchParams({ folder: relativeFolder });
+
   try {
-    const response = await fetch("/api/bootstrap");
-    if (!response.ok) throw new Error(`Could not open Dohwaji (${response.status})`);
+    const response = await fetch(`/api/bootstrap?${query}`);
+    if (!response.ok) throw new Error(`Could not open folder (${response.status})`);
     const data = await response.json();
 
-    folderName.textContent = data.folder;
-    folderName.title = data.folderPath;
+    resetCanvas();
+    activeFolder = data.selectedFolder;
+    populateFolderSelect(data.folders, activeFolder, data.folderPath);
     document.title = `${data.folder} — Dohwaji`;
     imageCount.textContent = `${data.images.length} image${data.images.length === 1 ? "" : "s"}`;
 
     if (data.images.length === 0) {
-      showCanvasMessage("This folder has no supported images. Dohwaji currently displays JPEG, PNG, WebP, GIF, and BMP files directly inside the selected folder.");
-      setSaveStatus("");
-      return;
+      showCanvasMessage("This folder has no supported images. Choose another folder above, or add a JPEG, PNG, WebP, GIF, or BMP file directly inside it.");
+      setSaveStatus("Ready");
+      return true;
     }
 
     let hasNewImages = false;
@@ -325,14 +367,37 @@ async function start() {
     expandCanvas();
     setSaveStatus("Ready");
     if (hasNewImages) scheduleSave();
+    return true;
   } catch (error) {
     console.error(error);
-    folderName.textContent = "Could not open folder";
-    showCanvasMessage(error.message, true);
-    setSaveStatus("Error", "error");
+    folderSelect.value = activeFolder;
+    if (items.size === 0) showCanvasMessage(error.message, true);
+    setSaveStatus("Could not open folder", "error");
+    return false;
+  } finally {
+    folderSelect.disabled = folderSelect.options.length === 0;
   }
 }
 
+async function changeFolder() {
+  const requestedFolder = folderSelect.value;
+  if (requestedFolder === activeFolder) return;
+
+  folderSelect.disabled = true;
+  const saved = await saveLayout(activeFolder, layoutPayload());
+  if (!saved) {
+    folderSelect.value = activeFolder;
+    folderSelect.disabled = false;
+    return;
+  }
+  await loadFolder(requestedFolder);
+}
+
+async function start() {
+  await loadFolder("");
+}
+
+folderSelect.addEventListener("change", changeFolder);
 canvas.addEventListener("pointerdown", marqueeDown);
 canvas.addEventListener("pointermove", marqueeMove);
 canvas.addEventListener("pointerup", marqueeUp);

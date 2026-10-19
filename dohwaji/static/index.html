@@ -11,7 +11,10 @@
   <header class="toolbar">
     <div class="identity">
       <strong>Dohwaji</strong>
-      <span id="folder-name">Opening folder…</span>
+      <label class="visually-hidden" for="folder-select">Canvas folder</label>
+      <select id="folder-select" aria-label="Canvas folder" disabled>
+        <option>Opening folder…</option>
+      </select>
     </div>
     <div class="toolbar-meta">
       <span id="image-count"></span>

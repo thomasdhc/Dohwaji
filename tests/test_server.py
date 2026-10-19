@@ -25,6 +25,12 @@ class FolderFixture(unittest.TestCase):
         nested = self.source / "nested"
         nested.mkdir()
         (nested / "hidden.webp").write_bytes(b"nested-image")
+        deeper = nested / "deeper"
+        deeper.mkdir()
+        (deeper / "deep.gif").write_bytes(b"deep-image")
+        hidden_folder = self.source / ".hidden"
+        hidden_folder.mkdir()
+        (hidden_folder / "secret.png").write_bytes(b"secret-image")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -33,6 +39,18 @@ class FolderFixture(unittest.TestCase):
 class ImageDiscoveryTests(FolderFixture):
     def test_lists_only_supported_direct_children_in_name_order(self) -> None:
         self.assertEqual(image_names(self.source), ["alpha.png", "Beta.JPG"])
+
+    def test_lists_navigable_folders_without_hidden_directories(self) -> None:
+        app = DohwajiApp(self.source, self.state)
+
+        self.assertEqual(
+            app.folder_options(),
+            [
+                {"value": "", "label": "references (root)"},
+                {"value": "nested", "label": "nested"},
+                {"value": "nested/deeper", "label": "nested / deeper"},
+            ],
+        )
 
     def test_normalizes_only_current_finite_positions(self) -> None:
         layout = normalize_layout(
@@ -88,6 +106,26 @@ class PersistenceTests(FolderFixture):
         self.assertEqual([item["name"] for item in reopened["images"]], ["Beta.JPG", "new.webp"])
         self.assertEqual(reopened["layout"]["items"], {})
 
+    def test_nested_folders_have_independent_layouts(self) -> None:
+        app = DohwajiApp(self.source, self.state)
+        nested_layout = {"items": {"hidden.webp": {"x": 8, "y": 9, "z": 2}}}
+
+        app.save_layout(nested_layout, "nested")
+
+        nested = app.bootstrap("nested")
+        self.assertEqual(nested["selectedFolder"], "nested")
+        self.assertEqual([item["name"] for item in nested["images"]], ["hidden.webp"])
+        self.assertEqual(nested["layout"]["items"], nested_layout["items"])
+        self.assertEqual(app.bootstrap()["layout"]["items"], {})
+
+    def test_rejects_folders_outside_the_launched_root(self) -> None:
+        app = DohwajiApp(self.source, self.state)
+
+        self.assertIsNone(app.resolve_folder(".."))
+        self.assertIsNone(app.resolve_folder(str(self.root)))
+        with self.assertRaisesRegex(ValueError, "Folder not found"):
+            app.bootstrap("../references")
+
     def test_rejects_state_storage_inside_the_source_folder(self) -> None:
         with self.assertRaisesRegex(ValueError, "outside the selected folder"):
             DohwajiApp(self.source, self.source / ".dohwaji")
@@ -122,6 +160,32 @@ class HttpTests(FolderFixture):
             self.assertEqual(response.read(), b"png-one")
             self.assertEqual(response.headers.get_content_type(), "image/png")
 
+    def test_nested_folder_bootstrap_media_and_layout(self) -> None:
+        folder_query = urlencode({"folder": "nested"})
+        bootstrap = self.get_json(f"/api/bootstrap?{folder_query}")
+        self.assertEqual(bootstrap["selectedFolder"], "nested")
+        self.assertEqual([item["name"] for item in bootstrap["images"]], ["hidden.webp"])
+        self.assertEqual(
+            [folder["value"] for folder in bootstrap["folders"]],
+            ["", "nested", "nested/deeper"],
+        )
+
+        media_query = urlencode({"folder": "nested", "name": "hidden.webp"})
+        with urlopen(f"{self.base}/media?{media_query}") as response:
+            self.assertEqual(response.read(), b"nested-image")
+
+        payload = {"items": {"hidden.webp": {"x": 31, "y": 42, "z": 3}}}
+        request = Request(
+            f"{self.base}/api/layout?{folder_query}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request) as response:
+            self.assertEqual(json.load(response)["items"], payload["items"])
+        self.assertEqual(self.get_json(f"/api/bootstrap?{folder_query}")["layout"]["items"], payload["items"])
+        self.assertEqual(self.get_json("/api/bootstrap")["layout"]["items"], {})
+
     def test_layout_post_persists_and_filters_unknown_images(self) -> None:
         payload = {
             "items": {
@@ -145,6 +209,17 @@ class HttpTests(FolderFixture):
         query = urlencode({"name": "nested/hidden.webp"})
         with self.assertRaises(HTTPError) as caught:
             urlopen(f"{self.base}/media?{query}")
+        self.assertEqual(caught.exception.code, 404)
+
+    def test_http_endpoints_reject_folder_traversal(self) -> None:
+        folder_query = urlencode({"folder": ".."})
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(f"{self.base}/api/bootstrap?{folder_query}")
+        self.assertEqual(caught.exception.code, 404)
+
+        media_query = urlencode({"folder": "..", "name": "outside.png"})
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(f"{self.base}/media?{media_query}")
         self.assertEqual(caught.exception.code, 404)
 
 

@@ -39,14 +39,14 @@ Dohwaji opens `http://127.0.0.1:8765/` in the default browser. Keep the Terminal
 
 The local image collection lives under `library/`, which is intentionally excluded from Git. macOS also saves new screenshots directly into this directory. The existing `screenshots/`, `reference/`, and `new_ref/` archives remain nested beneath it.
 
-To use one archived folder as its own canvas, pass that folder instead. Quote paths containing spaces:
+Use the folder menu in the top bar to switch between the library root and any nested archive. Each selected folder becomes its own canvas, shows only images directly inside it, and restores its own saved arrangement.
+
+You can also launch a nested folder directly. Quote paths containing spaces:
 
 ```bash
 python3 -m dohwaji library/reference/fashion
 python3 -m dohwaji "library/screenshots/misc/art"
 ```
-
-Only supported images directly inside the selected folder are shown; nested folders are not included in the first prototype. Opening the same folder again restores its saved arrangement.
 
 If the browser does not open automatically, visit `http://127.0.0.1:8765/` manually. If port 8765 is already occupied, select another local port:
 
@@ -56,6 +56,7 @@ python3 -m dohwaji library --port 8766
 
 On the canvas:
 
+- choose the active folder from the menu beside **Dohwaji**;
 - drag across empty canvas space to select several images;
 - drag any selected image to move the whole selection;
 - select an unselected image to return to a single-image selection; and

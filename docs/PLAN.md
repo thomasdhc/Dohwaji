@@ -14,8 +14,8 @@ Dohwaji should preserve that visual and spatial behavior. The filesystem remains
 
 ## Decisions
 
-- The prototype operates on one explicitly selected local folder at a time.
-- Version one shows supported images that are direct children of that folder. Recursive browsing and cross-folder collections are deferred.
+- The prototype launches one explicit local root and allows navigation among that root and its descendant folders.
+- The canvas shows supported images that are direct children of the currently selected folder. Combining images recursively or across folders is deferred.
 - The main view is a freeform two-dimensional canvas, not a folder tree or a vertically grouped gallery.
 - Images retain their aspect ratios and are not cropped.
 - Images can be selected individually or with a marquee, and a selected set can be dragged together; their positions persist across application restarts.
@@ -30,8 +30,8 @@ Dohwaji should preserve that visual and spatial behavior. The filesystem remains
 
 ## Acceptance Invariants
 
-1. The user can launch Dohwaji for a local folder without importing or copying its images.
-2. Each supported image directly under the folder appears once on the canvas, uncropped and with its aspect ratio preserved.
+1. The user can launch Dohwaji for a local root and navigate its descendant folders without importing or copying images.
+2. Each supported image directly under the selected folder appears once on the canvas, uncropped and with its aspect ratio preserved.
 3. The user can marquee-select multiple images and drag the selected images together to new canvas positions.
 4. After closing and reopening Dohwaji for the same folder, saved image positions are restored.
 5. Double-clicking an image opens its original representation directly in a new browser tab.
@@ -41,8 +41,8 @@ Dohwaji should preserve that visual and spatial behavior. The filesystem remains
 
 ## Plan
 
-1. Establish a dependency-light local launcher and serve the selected folder's supported images to a minimal browser interface.
-2. Render images on a scrollable freeform canvas with a deterministic initial arrangement.
+1. Establish a dependency-light local launcher and securely serve the selected root and its descendant folders to a minimal browser interface.
+2. Add top-bar folder navigation and render each selected folder's images on a scrollable freeform canvas with a deterministic initial arrangement.
 3. Add single- and multi-image dragging and persist positions in local application data.
 4. Open an original image directly from the canvas without an intermediate viewer.
 5. Validate reopening, source-folder changes, and the no-source-modification invariant against a representative reference folder.
@@ -51,7 +51,7 @@ Dohwaji should preserve that visual and spatial behavior. The filesystem remains
 
 - Reading or reproducing Finder Desktop icon positions
 - Infinite zoom, minimaps, and semantic zoom
-- Nested folders and multiple folders on one canvas
+- Recursive or multiple-folder collections on one canvas
 - Source-group labels, tags, search, and filtering
 - Thumbnail generation and large-library optimization
 - Moving groups between active and archived areas
