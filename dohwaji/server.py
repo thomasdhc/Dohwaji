@@ -18,6 +18,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
+from .locking import StateLock
+
 SUPPORTED_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 MAX_LAYOUT_BYTES = 2 * 1024 * 1024
 STATIC_ROOT = Path(__file__).with_name("static")
@@ -214,15 +216,40 @@ class DohwajiApp:
 
 
 class DohwajiServer(ThreadingHTTPServer):
-    daemon_threads = True
+    daemon_threads = False
+    block_on_close = True
 
     def __init__(self, address: tuple[str, int], app: DohwajiApp) -> None:
         self.app = app
-        super().__init__(address, DohwajiRequestHandler)
+        self._state_lock = StateLock(app.state_root, shared=True)
+        self._state_lock.__enter__()
+        try:
+            for history_path in (app.state_root / "archives").glob("*/history.json"):
+                history = json.loads(history_path.read_text(encoding="utf-8"))
+                if history.get("pending") is not None:
+                    raise ValueError(
+                        f"An archive operation needs recovery before opening Dohwaji. "
+                        f"Use --undo --apply for {history.get('library')}."
+                    )
+            super().__init__(address, DohwajiRequestHandler)
+        except BaseException:
+            self._state_lock.__exit__(None, None, None)
+            raise
+
+    def server_close(self) -> None:
+        try:
+            super().server_close()
+        finally:
+            self._state_lock.__exit__(None, None, None)
 
 
 class DohwajiRequestHandler(BaseHTTPRequestHandler):
     server: DohwajiServer
+
+    def setup(self) -> None:
+        # A stalled local client must not retain the state lock indefinitely on close.
+        self.request.settimeout(10)
+        super().setup()
 
     def log_message(self, format: str, *args: Any) -> None:
         if getattr(self.server, "quiet", False):
