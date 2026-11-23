@@ -55,5 +55,5 @@ Dohwaji should preserve that visual and spatial behavior. The filesystem remains
 - Source-group labels, tags, search, and filtering
 - Thumbnail generation and large-library optimization
 - Moving groups between active and archived areas
-- Editing, deleting, renaming, or reorganizing source files
+- Editing, deleting, renaming, or reorganizing source files from the canvas (manual cutoff moves are provided separately by the [archiver](ARCHIVING.md))
 - Mobile access, synchronization, or cloud storage
