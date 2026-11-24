@@ -191,6 +191,12 @@ class Archive:
             snapshots.append({"folder": relative, "before": before, "after": after})
         if files:
             active = {name: position for name, position in positions.items() if name not in moved_names}
+            if active:
+                shift = max(0, min(position["y"] for position in active.values()) - 64)
+                active = {
+                    name: {**position, "y": round(position["y"] - shift, 3)}
+                    for name, position in active.items()
+                }
             after = json_text({"version": 1, "folder": str(self.root), "items": active})
             snapshots.append({"folder": "", "before": root_before, "after": after})
         return snapshots

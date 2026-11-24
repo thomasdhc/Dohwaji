@@ -214,6 +214,84 @@ class ApplyAndUndoTests(ArchiveFixture):
         self.assertEqual(self.archive.layout_path("").read_text(encoding="utf-8"), root_layout_before)
         self.assertFalse(self.archive.layout_path("archive/before-2026-10-23").exists())
 
+    def test_archive_trims_root_blank_space_and_undo_restores_original_offset(self) -> None:
+        moved = self.image("Screenshot 2026-10-20 at noon.png")
+        first = self.image("Screenshot 2026-10-23 at noon.png")
+        second = self.image("Screenshot 2026-10-24 at noon.png")
+        unknown = self.image("reference.png")
+        items = {
+            moved.name: {"x": 200, "y": 8000, "z": 9},
+            first.name: {"x": 900, "y": 5400.5, "z": 2},
+            second.name: {"x": 300, "y": 5000.25, "z": 7},
+            unknown.name: {"x": 600, "y": 5300.125, "z": 4},
+        }
+        app = DohwajiApp(self.library, self.state)
+        app.save_layout({"items": items})
+        before = self.archive.layout_path("").read_bytes()
+        self.archive.plan(INITIAL_CUTOFF)
+        self.assertEqual(self.archive.layout_path("").read_bytes(), before)
+
+        self.archive.apply(INITIAL_CUTOFF)
+
+        self.assertEqual(self.layout()["items"], {
+            first.name: {"x": 900, "y": 464.25, "z": 2},
+            second.name: {"x": 300, "y": 64, "z": 7},
+            unknown.name: {"x": 600, "y": 363.875, "z": 4},
+        })
+        self.assertEqual(self.layout("archive/before-2026-10-23")["items"], {
+            moved.name: items[moved.name],
+        })
+        self.archive.undo()
+        self.assertEqual(self.archive.layout_path("").read_bytes(), before)
+
+    def test_unsaved_remaining_images_are_translated_from_the_original_grid(self) -> None:
+        for index in range(6):
+            self.image(f"Screenshot 2026-10-20 at {index}.png")
+        active = self.image("Screenshot 2026-10-23 at noon.png")
+        self.archive.apply(INITIAL_CUTOFF)
+        self.assertEqual(self.layout()["items"], {
+            active.name: {"x": 364, "y": 64, "z": 7},
+        })
+        self.assertEqual(
+            self.layout("archive/before-2026-10-23")["items"]["Screenshot 2026-10-20 at 5.png"],
+            {"x": 64, "y": 334, "z": 6},
+        )
+        self.archive.undo()
+        self.assertFalse(self.archive.layout_path("").exists())
+
+    def test_root_at_or_above_top_margin_is_not_shifted_down(self) -> None:
+        moved = self.image("Screenshot 2026-10-20 at noon.png")
+        active = self.image("Screenshot 2026-10-23 at noon.png")
+        app = DohwajiApp(self.library, self.state)
+        for y in (0, 32.5, 64):
+            with self.subTest(y=y):
+                position = {"x": 123, "y": y, "z": 4}
+                app.save_layout({"items": {
+                    moved.name: {"x": 64, "y": 64, "z": 1}, active.name: position,
+                }})
+                self.archive.apply(INITIAL_CUTOFF)
+                self.assertEqual(self.layout()["items"], {active.name: position})
+                self.archive.undo()
+
+    def test_archiving_every_image_leaves_an_empty_root_layout(self) -> None:
+        moved = self.image("Screenshot 2026-10-20 at noon.png")
+        DohwajiApp(self.library, self.state).save_layout({"items": {
+            moved.name: {"x": 64, "y": 5000, "z": 1},
+        }})
+        self.archive.apply(INITIAL_CUTOFF)
+        self.assertEqual(self.layout()["items"], {})
+        self.assertEqual(self.layout("archive/before-2026-10-23")["items"][moved.name]["y"], 5000)
+
+    def test_batch_without_moves_does_not_reposition_root(self) -> None:
+        active = self.image("Screenshot 2026-11-23 at noon.png")
+        DohwajiApp(self.library, self.state).save_layout({"items": {
+            active.name: {"x": 200, "y": 5000, "z": 3},
+        }})
+        before = self.archive.layout_path("").read_bytes()
+        for cutoff in (INITIAL_CUTOFF, INITIAL_CUTOFF, SECOND_CUTOFF):
+            self.archive.apply(cutoff)
+            self.assertEqual(self.archive.layout_path("").read_bytes(), before)
+
     def test_equal_and_later_cutoffs_append_to_the_correct_historical_interval(self) -> None:
         first = self.image("Screenshot 2026-10-20 at noon.png", b"first")
         self.archive.apply(INITIAL_CUTOFF)
@@ -486,6 +564,31 @@ Archive(Path(sys.argv[1]), Path(sys.argv[2])).apply(date(2026, 10, 23))
         self.assertIsNotNone(archive.history()["pending"])
         archive.undo()
         self.assert_recovered(archive, library, source, root_layout_before)
+
+    def test_interruption_after_root_translation_restores_original_offset(self) -> None:
+        moved = self.image("Screenshot 2026-10-20 at noon.png", b"moved")
+        active = self.image("Screenshot 2026-10-23 at noon.png", b"active")
+        app = DohwajiApp(self.library, self.state)
+        app.save_layout({"items": {
+            moved.name: {"x": 100, "y": 4000, "z": 2},
+            active.name: {"x": 200, "y": 5000, "z": 3},
+        }})
+        root_path = self.archive.layout_path("")
+        before = root_path.read_bytes()
+
+        def interrupt_after_root_save(path: Path, text: str) -> None:
+            atomic_text(path, text)
+            if path == root_path:
+                self.assertEqual(self.layout()["items"][active.name]["y"], 64)
+                raise InterruptedError("root translation interrupted")
+
+        with mock.patch("dohwaji.archive.atomic_text", side_effect=interrupt_after_root_save):
+            with self.assertRaises(InterruptedError):
+                self.archive.apply(INITIAL_CUTOFF)
+        self.archive.undo()
+        self.assertEqual(root_path.read_bytes(), before)
+        self.assertEqual(moved.read_bytes(), b"moved")
+        self.assertEqual(active.read_bytes(), b"active")
 
     def test_layout_save_interruption_after_write_is_fully_recoverable(self) -> None:
         archive, library, source, root_layout_before = self.prepare_recovery_case("layout")
